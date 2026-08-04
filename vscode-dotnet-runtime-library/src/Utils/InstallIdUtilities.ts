@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
 
-import { DotnetCoreAcquisitionWorker } from '../Acquisition/DotnetCoreAcquisitionWorker';
+import { getDefaultArchitecture } from '../Acquisition/ArchitectureUtilities';
 import { DotnetInstall, looksLikeRuntimeVersion } from '../Acquisition/DotnetInstall';
 import { DOTNET_INSTALL_MODE_LIST, DotnetInstallMode } from '../Acquisition/DotnetInstallMode';
 import { IAcquisitionWorkerContext } from '../Acquisition/IAcquisitionWorkerContext';
@@ -19,7 +19,7 @@ export function getInstallIdCustomArchitecture(version: string, architecture: st
     }
     else if (architecture === undefined)
     {
-        architecture = DotnetCoreAcquisitionWorker.defaultArchitecture();
+        architecture = getDefaultArchitecture();
     }
 
     return installType === 'global' ? `${version}-global~${architecture}${mode === 'aspnetcore' ? '~aspnetcore' : ''}` :
@@ -67,6 +67,14 @@ export function getVersionFromLegacyInstallId(installId: string): string
 {
     if (isGlobalLegacyInstallId(installId))
     {
+        // Global install ids are encoded as `${version}-global~${arch}...` but the version may contain dashes
+        const globalMarkerIndex = installId.toLowerCase().indexOf('-global');
+        if (globalMarkerIndex !== -1)
+        {
+            return installId.substring(0, globalMarkerIndex);
+        }
+
+        // Fallback for malformed ids that contain 'global' without the canonical '-global' marker.
         const splitId = installId.split('-');
         return splitId[0];
     }
@@ -89,13 +97,13 @@ export function getAssumedInstallInfo(id: string, mode: DotnetInstallMode | null
     return {
         installId: id,
         version: getVersionFromLegacyInstallId(id),
-        architecture: getArchFromLegacyInstallId(id) ?? DotnetCoreAcquisitionWorker.defaultArchitecture(),
+        architecture: getArchFromLegacyInstallId(id) ?? getDefaultArchitecture(),
         isGlobal: isGlobalLegacyInstallId(id),
 
         // This code is for legacy install strings where the info was not recorded.
         // At the time only runtime or sdk was permitted and there were no outlier edge case versions that would be wrong.
         // So this assumption can hold true below. Do not utilize this going forward for new code.
-        installMode: mode ?? isRuntimeInstallId(id) ? 'runtime' : 'sdk'
+        installMode: mode ?? (isRuntimeInstallId(id) ? 'runtime' : 'sdk')
     };
 }
 

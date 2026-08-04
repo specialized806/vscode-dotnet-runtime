@@ -8,7 +8,7 @@ import { CommandExecutor } from '../Utils/CommandExecutor';
 import { FileUtilities } from '../Utils/FileUtilities';
 import { ICommandExecutor } from '../Utils/ICommandExecutor';
 import { IUtilityContext } from '../Utils/IUtilityContext';
-import { DotnetCoreAcquisitionWorker } from './DotnetCoreAcquisitionWorker';
+import { getDefaultArchitecture } from './ArchitectureUtilities';
 import { DotnetResolver } from './DotnetResolver';
 import { IAcquisitionWorkerContext } from './IAcquisitionWorkerContext';
 import { IDotnetConditionValidator } from './IDotnetConditionValidator';
@@ -33,7 +33,7 @@ export class DotnetConditionValidator implements IDotnetConditionValidator
     {
         const availableInstalls = await this.resolver.getDotnetInstalls(dotnetExecutablePath, requirement.acquireContext.mode ?? 'runtime', requirement.acquireContext.architecture);
         // Assumption : All APIs we call return only one architecture in the group of installs we get (currently a true assumption)
-        const determinedInstallArchitecture = availableInstalls.at(0)?.architecture ?? DotnetCoreAcquisitionWorker.defaultArchitecture();
+        const determinedInstallArchitecture = availableInstalls.at(0)?.architecture ?? getDefaultArchitecture();
 
         if (requirement.acquireContext.mode === 'sdk')
         {
@@ -94,25 +94,30 @@ export class DotnetConditionValidator implements IDotnetConditionValidator
             const availableMinor = Number(versionUtils.getMinor(availableVersion, this.workerContext.eventStream, this.workerContext));
             const requestedMinor = Number(versionUtils.getMinor(requestedVersion, this.workerContext.eventStream, this.workerContext));
 
-            if (availableMinor === requestedMinor && requestedPatch)
+            if (availableMinor === requestedMinor && requestedPatch !== null)
             {
                 const availablePatch = this.getPatchOrFeatureBandWithPatch(availableVersion, requirement);
+                const patchComparison = availablePatch === requestedPatch ?
+                    versionUtils.compareVersionsIncludingPreRelease(availableVersion, requestedVersion) :
+                    availablePatch! - requestedPatch;
 
                 switch (adjustedVersionSpec)
                 {
                     // the 'availablePatch' must exist, since the version is from --list-runtimes or --list-sdks, or our internal tracking of installs.
                     case 'equal':
-                        return availablePatch === requestedPatch;
+                        // For an exact match (rollForward: 'disable'), a pre-release build must match exactly (e.g. -preview.5 vs -preview.6)
+                        return availablePatch === requestedPatch &&
+                            versionUtils.getPreReleaseSuffix(availableVersion) === versionUtils.getPreReleaseSuffix(requestedVersion);
                     case 'greater_than_or_equal':
                     case 'latestFeature':
-                        return availablePatch! >= requestedPatch;
+                        return patchComparison >= 0;
                     case 'less_than_or_equal':
-                        return availablePatch! <= requestedPatch;
+                        return patchComparison <= 0;
                     case 'latestPatch':
                         const availableBand = this.getFeatureBand(availableVersion, requirement);
                         const requestedBandStr = requirement.acquireContext.mode === 'sdk' ? versionUtils.getFeatureBandFromVersion(requestedVersion, this.workerContext.eventStream, this.workerContext, false) ?? null : null;
                         const requestedBand = requestedBandStr ? Number(requestedBandStr) : null;
-                        return availablePatch! >= requestedPatch && (availableBand ? availableBand === requestedBand : true);
+                        return patchComparison >= 0 && (availableBand ? availableBand === requestedBand : true);
                 }
             }
             else
@@ -199,7 +204,7 @@ export class DotnetConditionValidator implements IDotnetConditionValidator
     {
         if (requirement.rejectPreviews === true)
         {
-            return !versionUtils.isPreviewVersion(availableVersion, this.workerContext.eventStream, this.workerContext);
+            return !versionUtils.hasPreReleaseSuffix(availableVersion);
         }
         return true;
     }

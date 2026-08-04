@@ -10,7 +10,7 @@ import { IDotnetAcquireResult } from '../IDotnetAcquireResult';
 import { IExtensionState } from '../IExtensionState';
 import { AcquireErrorConfiguration } from '../Utils/ErrorHandler';
 import { WebRequestWorkerSingleton } from '../Utils/WebRequestWorkerSingleton';
-import { DotnetCoreAcquisitionWorker } from './DotnetCoreAcquisitionWorker';
+import { getDefaultArchitecture } from './ArchitectureUtilities';
 import { DotnetInstallMode } from './DotnetInstallMode';
 import { IInstallationDirectoryProvider } from './IInstallationDirectoryProvider';
 import { IInstallManagementService } from './IInstallManagementService';
@@ -86,7 +86,7 @@ export class LocalInstallUpdateService extends IInstallManagementService
     {
         const runtimeInstalls = (await this.installTrackerType.getInstance(this.eventStream, this.extensionState).getExistingInstalls(this.managementDirectoryProvider, false)).filter(i => i.dotnetInstall.installMode !== 'sdk' && i.dotnetInstall.isGlobal !== true);
         const installGroupsToInstalls = new Map<string, { key: InstallGroup; installs: InstallRecord[] }>();
-        const currentArchitecture = DotnetCoreAcquisitionWorker.defaultArchitecture();
+        const currentArchitecture = getDefaultArchitecture();
 
         for (const install of runtimeInstalls)
         {
@@ -169,7 +169,7 @@ export class LocalInstallUpdateService extends IInstallManagementService
             const tracker = this.installTrackerType.getInstance(this.eventStream, this.extensionState);
             const extensionManagedInstalls = await tracker.getExistingInstalls(this.managementDirectoryProvider, false);
             const newInstallsInGroup = extensionManagedInstalls.filter(i => i.dotnetInstall.installMode === group.mode &&
-                (i.dotnetInstall.architecture || DotnetCoreAcquisitionWorker.defaultArchitecture()) === group.architecture &&
+                (i.dotnetInstall.architecture || getDefaultArchitecture()) === group.architecture &&
                 versionUtils.getMajorMinorFromValidVersion(i.dotnetInstall.version) === group.majorMinor);
 
             // All of the installs were uninstalled in the middle of this process.
@@ -189,13 +189,12 @@ export class LocalInstallUpdateService extends IInstallManagementService
                     const parts = install.dotnetInstall.version.split('.');
                     const latestParts = latestInstall.dotnetInstall.version.split('.');
 
-                    // Compare full third component if it exists
+                    // Compare full third component if it exists. compareVersionsIncludingPreRelease is pre-release
+                    // aware, so among installs sharing a patch (e.g. two previews like -preview.5 vs -preview.6, or a
+                    // preview vs its RTM) the genuinely newer one is selected instead of the first encountered.
                     if (parts.length > 2 && latestParts.length > 2)
                     {
-                        const currentPatch = Number(parts[2].split('-')?.[0] ?? 0); // Remove any suffix like -rc
-                        const latestPatch = Number(latestParts[2].split('-')?.[0] ?? 0);
-
-                        if (currentPatch > latestPatch)
+                        if (versionUtils.compareVersionsIncludingPreRelease(install.dotnetInstall.version, latestInstall.dotnetInstall.version) > 0)
                         {
                             latestInstall = install;
                         }

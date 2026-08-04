@@ -8,9 +8,9 @@ import * as path from 'path';
 import { DistroPackagesSearch, DistroSupport, DotnetVersionResolutionError, EventBasedError } from '../EventStream/EventStreamEvents';
 import { CommandExecutor } from '../Utils/CommandExecutor';
 import { READ_SYMLINK_CACHE_DURATION_MS } from './CacheTimeConstants';
+import { DotnetDistroSupportStatus } from './DistroTypes';
 import { DotnetInstallMode } from './DotnetInstallMode';
 import { IDistroDotnetSDKProvider } from './IDistroDotnetSDKProvider';
-import { DotnetDistroSupportStatus } from './LinuxVersionResolver';
 import * as versionUtils from './VersionUtilities';
 
 export class GenericDistroSDKProvider extends IDistroDotnetSDKProvider
@@ -148,7 +148,11 @@ export class GenericDistroSDKProvider extends IDistroDotnetSDKProvider
         const commandResult = (await this.commandRunner.executeMultipleCommands(command, { cwd: path.resolve(rootDir), shell: true }, false))[0];
 
         commandResult.stdout = commandResult.stdout.replace('\n', '');
-        if (!versionUtils.isValidLongFormVersionFormat(commandResult.stdout, this.context.eventStream, this.context))
+        // `dotnet --version` reports the exact installed SDK, which may be a fully specified pre-release build (e.g.
+        // 11.0.100-preview.6.26352.110). isValidLongFormVersionFormat rejects the pre-release suffix, so also accept
+        // a fully specified preview version; otherwise an installed preview SDK would be treated as "not installed".
+        if (!versionUtils.isValidLongFormVersionFormat(commandResult.stdout, this.context.eventStream, this.context) &&
+            !versionUtils.isFullySpecifiedPreviewVersion(commandResult.stdout, this.context.eventStream, this.context))
         {
             return null;
         }
