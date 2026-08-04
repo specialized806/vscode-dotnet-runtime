@@ -15,6 +15,13 @@ pr:
   branches:
     include:
     - '*'
+schedules:
+- cron: '0 8 * * 1'
+  displayName: Weekly build
+  branches:
+    include:
+    - main
+  always: true
 
 variables:
 - name: is-runtime-release
