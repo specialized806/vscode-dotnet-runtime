@@ -39,6 +39,7 @@ import
         SuppressedAcquisitionError
     } from 'vscode-dotnet-runtime-library';
 import { settingsInfoContent } from './SettingsInfoContent';
+import { isUserCancellationMessage } from './ErrorMessageUtilities';
 
 /**
  * Tool name constants matching those in package.json
@@ -98,14 +99,6 @@ function textResult(text: string): vscode.LanguageModelToolResult
     return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(text)]);
 }
 
-/**
- * Heuristically detects whether an error/installer message indicates the user cancelled or declined an
- * elevation/credential prompt, so install and uninstall can surface a consistent "retry and accept prompts" hint.
- */
-function isUserCancellationMessage(message: string): boolean
-{
-    return /cancel|user rejected|user denied|password request/i.test(message);
-}
 
 /**
  * Builds the minimal IAcquisitionWorkerContext that the stateless VersionUtilities parsing helpers require.

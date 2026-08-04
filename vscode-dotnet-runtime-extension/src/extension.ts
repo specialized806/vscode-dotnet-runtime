@@ -92,6 +92,7 @@ import
 import { InstallTrackerSingleton } from 'vscode-dotnet-runtime-library/dist/Acquisition/InstallTrackerSingleton';
 import { EventStreamTaggingDecorator } from 'vscode-dotnet-runtime-library/dist/EventStream/EventStreamTaggingDecorator';
 import { dotnetCoreAcquisitionExtensionId } from './DotnetCoreAcquisitionId';
+import { buildUninstallFailureMessage } from './ErrorMessageUtilities';
 import { registerLanguageModelTools } from './LanguageModelTools';
 import open = require('open');
 
@@ -863,7 +864,7 @@ ${JSON.stringify(commandContext)}`));
                 // rethrown consistently when rethrowError is requested (e.g. for the LLM tools).
                 if (result !== '0' && result !== '')
                 {
-                    throw new Error(`Uninstall of .NET ${commandContext.version} did not succeed (code ${result}). The uninstaller may have been cancelled, blocked by another install in progress, or require manual removal.`);
+                    throw new Error(buildUninstallFailureMessage(commandContext.version, result));
                 }
             }
         }, getIssueContext(existingPathConfigWorker)(commandContext?.errorConfiguration, 'uninstall'), commandContext?.requestingExtensionId, workerContext, commandContext?.rethrowError);

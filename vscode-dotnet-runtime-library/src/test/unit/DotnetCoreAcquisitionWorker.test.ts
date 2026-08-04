@@ -8,10 +8,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DotnetCoreAcquisitionWorker } from '../../Acquisition/DotnetCoreAcquisitionWorker';
+import { GetDotnetInstallInfo } from '../../Acquisition/DotnetInstall';
 import { DotnetInstallMode } from '../../Acquisition/DotnetInstallMode';
+import { GlobalInstallerResolver } from '../../Acquisition/GlobalInstallerResolver';
 import { IAcquisitionInvoker } from '../../Acquisition/IAcquisitionInvoker';
 import { IAcquisitionWorkerContext } from '../../Acquisition/IAcquisitionWorkerContext';
 import { InstallRecord } from '../../Acquisition/InstallRecord';
+import { LinuxGlobalInstaller } from '../../Acquisition/LinuxGlobalInstaller';
+import { WinMacGlobalInstaller } from '../../Acquisition/WinMacGlobalInstaller';
 import { IEventStream } from '../../EventStream/EventStream';
 import
 {
@@ -22,6 +26,7 @@ import
     DotnetLockEvent,
     DotnetUninstallAllCompleted,
     DotnetUninstallAllStarted,
+    DotnetUninstallFailed,
     TestAcquireCalled
 } from '../../EventStream/EventStreamEvents';
 import { EventType } from '../../EventStream/EventType';
@@ -334,6 +339,55 @@ ${eventStream.events.map(event => event.eventName).join(', ')}`);
     test('Acquire SDK and UninstallAll', async () =>
     {
         await acquireAndUninstallAll('6.0', 'sdk', 'local');
+    }).timeout(expectedTimeoutTime);
+
+    test('Global uninstall failure surfaces the installer error', async () =>
+    {
+        const version = '9.0.314';
+        const failureReason = 'User did not grant permission.';
+        const eventStream = new MockEventStream();
+        const context = getMockAcquisitionContext('sdk', version, expectedTimeoutTime, eventStream);
+        context.acquisitionContext.installType = 'global';
+        context.acquisitionContext.requestingExtensionId = 'test.extension';
+        const worker = getMockAcquisitionWorker(context);
+        const install = GetDotnetInstallInfo(version, 'sdk', 'global', os.arch());
+        const resolver = {
+            getFullySpecifiedVersion: async () => version,
+            getInstallerUrl: async () => 'https://example.invalid/dotnet-sdk.exe',
+            getInstallerHash: async () => ''
+        } as GlobalInstallerResolver;
+
+        const installerPrototypes: Array<{ prototype: { getExpectedGlobalSDKPath: any; uninstallSDK: any }; expectedSdkPath: string }> = [
+            { prototype: LinuxGlobalInstaller.prototype, expectedSdkPath: `/usr/share/dotnet/sdk/${version}` },
+            { prototype: WinMacGlobalInstaller.prototype, expectedSdkPath: `C:\\Program Files\\dotnet\\sdk\\${version}` }
+        ];
+        const restorers = installerPrototypes.map(({ prototype, expectedSdkPath }) =>
+        {
+            const originalGetPath = prototype.getExpectedGlobalSDKPath;
+            const originalUninstall = prototype.uninstallSDK;
+            prototype.getExpectedGlobalSDKPath = async () => expectedSdkPath;
+            prototype.uninstallSDK = async () => failureReason;
+            return () =>
+            {
+                prototype.getExpectedGlobalSDKPath = originalGetPath;
+                prototype.uninstallSDK = originalUninstall;
+            };
+        });
+
+        try
+        {
+            const result = await worker.uninstallGlobal(context, install, resolver, true);
+            const failureEvent = eventStream.events.find(event => event instanceof DotnetUninstallFailed) as DotnetUninstallFailed;
+
+            assert.equal(result, failureReason);
+            assert.exists(failureEvent);
+            assert.include(failureEvent.eventMessage, failureReason);
+            assert.notInclude(failureEvent.eventMessage, 'Another install may be in progress');
+        }
+        finally
+        {
+            restorers.forEach(restore => restore());
+        }
     }).timeout(expectedTimeoutTime);
 
     test('Correctly Removes Legacy (No-Architecture) Installs', async () =>
